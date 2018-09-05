@@ -2,13 +2,11 @@
 """
 Created on Wed Sep  5 15:38:25 2018
 
-@author: p511ybu
 """
 
 import pandas as pd
 import numpy as np
 from scipy.optimize import minimize
-#from ex8_utils import *
 import scipy.io
 import matplotlib.pyplot as plt
 
