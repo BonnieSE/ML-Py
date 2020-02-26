@@ -25,7 +25,7 @@ def load_housing_data(housing_path=HOUSING_PATH):
 
 fetch_housing_data()
 housing = load_housing_data()
-# The url does not work properly.
+# The url does not work properly
 ''' 
 '''
 tar = tarfile.open("cal_housing.tgz")
