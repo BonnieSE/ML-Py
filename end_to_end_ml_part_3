@@ -1,0 +1,207 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Mar  9 09:46:16 2020
+"""
+
+import os
+import tarfile
+from six.moves import urllib
+# The first way to load the data, what is the difference between these 2 ways of loading data?
+import pandas as pd
+# housing = pd.read_csv('cal_housing.tgz', compression='gzip', header=0, sep=' ', quotechar='"', error_bad_lines=False)
+
+# The second way to load the data
+with tarfile.open("cal_housing.tgz") as tar:
+    csv_path = tar.getnames()[0]
+    housing = pd.read_csv((tar.extractfile(csv_path)), names=["longitude", "latitude", "housing_median_age", "total_rooms", "total_bedrooms", "population", "households", "median_income", "median_house_value"])
+    
+print(housing.head())
+print(housing.info())
+print(housing.describe())
+print(type(housing))
+
+# but if you do not have large dataset, you run the risk of introducing a significant sampling bias. The test set generated using stratified sampling has
+# income category proportions almost identical to those in the full dataset, whereas the test set generated using purely random sampling is quite skewed.
+import numpy as np
+housing['income_cat'] = np.ceil(housing['median_income'] / 1.5)
+housing['income_cat'].where(housing['income_cat'] < 5, 5.0, inplace=True)
+
+from sklearn.model_selection import StratifiedShuffleSplit
+split = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+for train_index, test_index in split.split(housing, housing["income_cat"]):
+    strat_train_set = housing.loc[train_index]
+    strat_test_set = housing.loc[test_index]
+
+print(housing['income_cat'].value_counts() / len(housing))
+# Remove the income_cat attribute so the data is back to its original state
+for set in (strat_train_set, strat_test_set):
+    set.drop(["income_cat"], axis=1, inplace=True)
+    
+# Discover and visualize the dataset to gain insights
+housing = strat_train_set.copy()
+
+housing = strat_train_set.drop('median_house_value', axis=1)
+housing_labels = strat_train_set['median_house_value'].copy()
+
+# Data cleaning: 'total bedrooms attribute has some missing values'
+#housing['total_bedrooms'].fillna(median)
+
+from sklearn.preprocessing import Imputer
+imputer = Imputer(strategy='median')
+imputer.fit(housing)
+print(imputer.statistics_)
+housing.median().values
+X = imputer.transform(housing)
+print(X)
+housing_tr = pd.DataFrame(X, columns=housing.columns)
+print(housing_tr)
+
+# Custom TRANSFORMERS
+from sklearn.base import BaseEstimator, TransformerMixin
+rooms_ix, bedrooms_ix, population_ix, household_ix = 3, 4, 5, 6
+class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
+    def __init__(self, add_bedrooms_per_room = True):
+        self.add_bedrooms_per_room = add_bedrooms_per_room
+    def fit(self, X, y=None):
+        return self
+    def transform(self, X, y=None):
+        rooms_per_household = X[:, rooms_ix] / X[:, household_ix]
+        population_per_household = X[:, population_ix] / X[:, household_ix]
+        if self.add_bedrooms_per_room:
+            bedrooms_per_room = X[:, bedrooms_ix] / X[:, rooms_ix]
+            return np.c_[X, rooms_per_household, population_per_household, bedrooms_per_room]
+        else:
+            return np.c_[X, rooms_per_household, population_per_household]
+
+attr_adder = CombinedAttributesAdder(add_bedrooms_per_room=False)
+housing_extra_attribs = attr_adder.transform(housing.values)
+
+print(housing_extra_attribs)
+
+# feature scaling: min-max scaling--normalization, all the attribute end up ranging from 0 to 1 as default.
+
+# transformation pipelines
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import FeatureUnion
+num_attribs = list(housing)
+
+num_pipeline = Pipeline([
+        ('imputer', Imputer(strategy='median')),
+        ('attribs_adder', CombinedAttributesAdder()),
+        ('std_scaler', StandardScaler()),
+        ])
+# Run the pipeline    
+housing_prepared= num_pipeline.fit_transform(housing)
+print(housing_prepared)
+print(housing_prepared.shape)
+print(type(housing_prepared)) #this is a NumPy array
+
+# There is nothing in Scikit-Learn to handle Pandas DataFrames, so we write a custom transformer:
+from sklearn.base import BaseEstimator, TransformerMixin
+class DataFrameSelector(BaseEstimator, TransformerMixin):
+    def __init__self(attribute_names):
+        self.attribute_names = attribute_names
+    def fit(self, X, y=None):
+        return self
+    def transform(self, X):
+        return X[self.attribute_names].values
+    
+# Select and train a model
+# A linear regression model
+from sklearn.linear_model import LinearRegression
+lin_reg = LinearRegression()
+lin_reg.fit(housing_prepared, housing_labels)
+
+some_data = housing.iloc[:5]
+some_labels = housing_labels.iloc[:5]
+some_data_prepared = num_pipeline.transform(some_data)
+print("Predictions:\t", lin_reg.predict(some_data_prepared))
+print("Labels:\t\t", list(some_labels))
+
+# Measure the RMSE of the model
+from sklearn.metrics import mean_squared_error
+housing_predictions = lin_reg.predict(housing_prepared)
+lin_mse = mean_squared_error(housing_labels, housing_predictions)
+lin_rmse = np.sqrt(lin_mse)
+print(lin_rmse) #68810
+# underfitting the training data
+
+# A decision tree model
+from sklearn.tree import DecisionTreeRegressor
+tree_reg = DecisionTreeRegressor()
+tree_reg.fit(housing_prepared, housing_labels)
+
+housing_predictions = tree_reg.predict(housing_prepared)
+tree_mse = mean_squared_error(housing_labels, housing_predictions)
+tree_rmse = np.sqrt(tree_mse)
+print(tree_rmse)
+# overfitting the training data
+
+# K-fold cross_validation
+from sklearn.model_selection import cross_val_score
+scores = cross_val_score(tree_reg, housing_prepared, housing_labels, scoring='neg_mean_squared_error', cv=10)
+tree_rmse_scores = np.sqrt(-scores)
+def display_scores(scores):
+    print("Scores:", scores)
+    print("Mean:", scores.mean())
+    print("Standard deviation:", scores.std())    
+print(display_scores(tree_rmse_scores))
+
+# A random forest model
+from sklearn.ensemble import RandomForestRegressor
+
+forest_reg = RandomForestRegressor(n_estimators=10, random_state=42)
+forest_reg.fit(housing_prepared, housing_labels)
+
+housing_predictions = forest_reg.predict(housing_prepared)
+forest_mse = mean_squared_error(housing_labels, housing_predictions)
+forest_rmse = np.sqrt(forest_mse)
+print(forest_rmse)
+
+# A SVM model
+from sklearn.svm import SVR
+svm_reg = SVR(kernel='linear')
+svm_reg.fit(housing_prepared, housing_labels)
+housing_predictions = svm_reg.predict(housing_prepared)
+svm_mse = mean_squared_error(housing_labels, housing_predictions)
+svm_rmse = np.sqrt(svm_mse)
+print(svm_rmse)
+
+from sklearn.model_selection import GridSearchCV
+param_grid = [
+    # try 12 (3×4) combinations of hyperparameters
+    {'n_estimators': [3, 10, 30], 'max_features': [2, 4, 6, 8]},
+    # then try 6 (2×3) combinations with bootstrap set as False
+    {'bootstrap': [False], 'n_estimators': [3, 10], 'max_features': [2, 3, 4]},
+  ]
+
+forest_reg = RandomForestRegressor(random_state=42)
+# train across 5 folds, that's a total of (12+6)*5=90 rounds of training 
+grid_search = GridSearchCV(forest_reg, param_grid, cv=5,
+                           scoring='neg_mean_squared_error', return_train_score=True)
+grid_search.fit(housing_prepared, housing_labels)
+selectm = grid_search.best_estimator_
+print(selectm)
+
+# Evaluate your system on the test set
+final_model = grid_search.best_estimator_
+X_test = strat_test_set.drop('median_house_value', axis=1)
+y_test = strat_test_set['median_house_value'].copy()
+
+X_test_prepared = num_pipeline.transform(X_test)
+final_predictions = final_model.predict(X_test_prepared)
+final_mse = mean_squared_error(y_test, final_predictions)
+final_rmse = np.sqrt(final_mse)
+print(final_rmse)
+
+from scipy import stats
+confidence = 0.95
+squared_errors = (final_predictions - y_test) ** 2
+mean = squared_errors.mean()
+m = len(squared_errors)
+
+np.sqrt(stats.t.interval(confidence, m - 1,
+                         loc=np.mean(squared_errors),
+                         scale=stats.sem(squared_errors)))
+
