@@ -18,20 +18,11 @@ np.random.seed(42)
 #%matplotlib inline
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+
+# rc: default parameter settings: matplotlib.pyplot.rc(group, **kwargs)
 mpl.rc('axes', labelsize=14)
 mpl.rc('xtick', labelsize=12)
 mpl.rc('ytick', labelsize=12)
-
-# Where to save the figures
-PROJECT_ROOT_DIR = "."
-CHAPTER_ID = "training_linear_models"
-
-def save_fig(fig_id, tight_layout=True):
-    path = os.path.join(PROJECT_ROOT_DIR, "images", CHAPTER_ID, fig_id + ".png")
-    print("Saving figure", fig_id)
-    if tight_layout:
-        plt.tight_layout()
-    plt.savefig(path, format='png', dpi=300)
 
 # Ignore useless warnings (see SciPy issue #5998)
 import warnings
@@ -68,4 +59,8 @@ plt.legend(loc="upper left", fontsize=14)
 plt.axis([0, 2, 0, 15])
 plt.show()
 
-# from sklearn
+from sklearn.linear_model import LinearRegression
+lin_reg = LinearRegression()
+lin_reg.fit(X, y)
+print(lin_reg.intercept_) 
+print(lin_reg.coef_)
